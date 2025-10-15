@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Tic-Tac-Toe (Online/Offline)</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #f0f0f0;
+      margin: 0;
+      padding: 20px;
+    }
+    #game {
+      display: inline-block;
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    .cell {
+      width: 60px;
+      height: 60px;
+      border: 2px solid #333;
+      font-size: 30px;
+      display: inline-block;
+      line-height: 60px;
+      margin: 2px;
+      cursor: pointer;
+      background: #fff;
+    }
+    .cell:hover {
+      background: #f9f9f9;
+    }
+    button {
+      margin: 10px;
+      padding: 8px 16px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #status {
+      margin: 15px;
+      font-weight: bold;
+      min-height: 25px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Tic-Tac-Toe</h1>
+  <!-- If you want a visual icon, consider using an inline SVG or a small image for broader compatibility -->
+  <!-- Example: <h1><img src="game-icon.png" alt="Game Icon" style="height:1em;vertical-align:middle;"> Tic-Tac-Toe</h1> -->
+  
+  <div>
+    <button id="offlineBtn">Play Offline (Same Device)</button>
+    <button id="onlineBtn">Play Online</button>
+  </div>
+
+  <div id="onlineSetup" style="display:none; margin:20px;">
+    <div>
+      <input type="text" id="roomIdInput" placeholder="Enter Room ID" />
+      <button id="joinRoomBtn">Join Room</button>
+    </div>
+    <div>
+      <button id="createRoomBtn">Create Room</button>
+      <p id="roomIdDisplay"></p>
+    </div>
+  </div>
+
+  <div id="game" style="display:none;">
+    <div id="status">Your turn: X</div>
+    <div id="board"></div>
+    <button id="restartBtn">Restart Game</button>
+  </div>
+
+  <script>
+    // Game state
+    let board = Array(9).fill(null);
+    let isOnline = false;
+    let socket = null;
+    let myPlayer = 'X'; // default for offline
+    let isMyTurn = true;
+    let gameActive = true;
+
+    // DOM elements
+    const offlineBtn = document.getElementById('offlineBtn');
+    const onlineBtn = document.getElementById('onlineBtn');
+    const onlineSetup = document.getElementById('onlineSetup');
+    const gameDiv = document.getElementById('game');
+    const boardDiv = document.getElementById('board');
+    const statusDiv = document.getElementById('status');
+    const roomIdInput = document.getElementById('roomIdInput');
+    const joinRoomBtn = document.getElementById('joinRoomBtn');
+    const createRoomBtn = document.getElementById('createRoomBtn');
+    const roomIdDisplay = document.getElementById('roomIdDisplay');
+    const restartBtn = document.getElementById('restartBtn');
+
+    // Initialize board UI
+    function initBoard() {
+      boardDiv.innerHTML = '';
+      for (let i = 0; i < 9; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.dataset.index = i;
+        cell.addEventListener('click', () => handleCellClick(i));
+        boardDiv.appendChild(cell);
+      }
+    }
+
+    function updateUI() {
+      const cells = document.querySelectorAll('.cell');
+      cells.forEach((cell, i) => {
+        cell.textContent = board[i] || '';
+        cell.style.cursor = (gameActive && board[i] === null && isMyTurn) ? 'pointer' : 'not-allowed';
+        if (board[i]) cell.style.color = board[i] === 'X' ? 'blue' : 'red';
+      });
+
+      if (!gameActive) {
+        statusDiv.textContent = winner ? 
+          (winner === 'draw' ? "It's a draw!" : `Player ${winner} wins!`) :
+          (isOnline ? "Waiting for opponent..." : "Game over");
+      } else {
+        statusDiv.textContent = isOnline ? 
+          (isMyTurn ? `Your turn (${myPlayer})` : "Opponent's turn...") :
+          `Your turn: ${isMyTurn ? 'X' : 'O'}`;
+      }
+    }
+
+    function resetGame() {
+      board = Array(9).fill(null);
+      gameActive = true;
+      if (isOnline) {
+        // In real app, you'd send a reset request
+        // For simplicity, just reset locally (both players must restart)
+        alert("Both players must click 'Restart' to continue.");
+      } else {
+        isMyTurn = true;
+      }
+      updateUI();
+    }
+
+    function handleCellClick(index) {
+      if (!gameActive || board[index] !== null) return;
+
+      if (isOnline) {
+        if (!isMyTurn) return;
+        socket.send(JSON.stringify({ type: 'move', index, roomId: currentRoomId }));
+      } else {
+        // Offline: alternate turns
+        board[index] = isMyTurn ? 'X' : 'O';
+        const winner = checkWinner(board);
+        if (winner) {
+          gameActive = false;
+        } else {
+          isMyTurn = !isMyTurn;
+        }
+        updateUI();
+      }
+    }
+
+    function checkWinner(b) {
+      const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+      for (let [a,b,c] of lines) {
+        if (b[a] && b[a] === b[b] && b[a] === b[c]) return b[a];
+      }
+      return b.includes(null) ? null : 'draw';
+    }
+
+    // Offline mode
+    offlineBtn.addEventListener('click', () => {
+      isOnline = false;
+      gameDiv.style.display = 'block';
+      onlineSetup.style.display = 'none';
+      resetGame();
+      initBoard();
+      updateUI();
+    });
+
+    // Online mode UI
+    onlineBtn.addEventListener('click', () => {
+      onlineSetup.style.display = 'block';
+    });
+
+    // WebSocket setup
+    let currentRoomId = null;
+
+    createRoomBtn.addEventListener('click', () => {
+      socket = new WebSocket(`ws://${window.location.host}`);
+      
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ type: 'createRoom' }));
+      };
+
+      socket.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'roomCreated') {
+          currentRoomId = msg.roomId;
+          roomIdDisplay.textContent = `Share this room ID: ${msg.roomId}`;
+          myPlayer = 'X';
+          isMyTurn = true;
+        } else if (msg.type === 'gameStart') {
+          isMyTurn = msg.yourTurn;
+          myPlayer = msg.yourTurn ? 'X' : 'O';
+          gameDiv.style.display = 'block';
+          onlineSetup.style.display = 'none';
+          resetGame();
+          initBoard();
+          updateUI();
+        } else if (msg.type === 'update') {
+          board = msg.board;
+          gameActive = !msg.winner;
+          isMyTurn = msg.currentPlayer !== myPlayer;
+          updateUI();
+        } else if (msg.type === 'error') {
+          alert(msg.message);
+        }
+      };
+    });
+
+    joinRoomBtn.addEventListener('click', () => {
+      const roomId = roomIdInput.value.trim().toUpperCase();
+      if (!roomId) return alert("Enter a room ID");
+      
+      socket = new WebSocket(`ws://${window.location.host}`);
+      
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ type: 'joinRoom', roomId }));
+      };
+
+      socket.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'gameStart') {
+          isMyTurn = msg.yourTurn;
+          myPlayer = msg.yourTurn ? 'X' : 'O';
+          currentRoomId = roomId;
+          gameDiv.style.display = 'block';
+          onlineSetup.style.display = 'none';
+          resetGame();
+          initBoard();
+          updateUI();
+        } else if (msg.type === 'update') {
+          board = msg.board;
+          gameActive = !msg.winner;
+          isMyTurn = msg.currentPlayer !== myPlayer;
+          updateUI();
+        } else if (msg.type === 'error') {
+          alert(msg.message);
+        }
+      };
+    });
+
+    restartBtn.addEventListener('click', resetGame);
+
+    // Start with offline as default suggestion
+    initBoard();
+  </script>
+</body>
+</html>
